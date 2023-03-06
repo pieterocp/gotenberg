@@ -14,7 +14,7 @@ type SentinelHTTPError struct {
 }
 
 // NewSentinelHTTPError creates a SentinelHTTPError. The message will be sent
-// as the response's body if returned from an handler, so make sure to not leak
+// as the response's body if returned from a handler, so make sure to not leak
 // sensible information.
 func NewSentinelHTTPError(status int, message string) SentinelHTTPError {
 	return SentinelHTTPError{
@@ -52,15 +52,15 @@ func (w sentinelWrappedError) HTTPError() (int, string) {
 // will be displayed in a log, while the SentinelHTTPError will be sent in the
 // response.
 //
-//  return api.WrapError(
-//    // This first error will be logged.
-//    fmt.Errorf("my action: %w", err),
-//    // The HTTP error will be sent as a response.
-//    api.NewSentinelHTTPError(
-//      http.StatusForbidden,
-//      "Hey, you did something wrong!"
-//    ),
-//  )
+//	return api.WrapError(
+//	  // This first error will be logged.
+//	  fmt.Errorf("my action: %w", err),
+//	  // The HTTP error will be sent as a response.
+//	  api.NewSentinelHTTPError(
+//	    http.StatusForbidden,
+//	    "Hey, you did something wrong!"
+//	  ),
+//	)
 func WrapError(err error, sentinel SentinelHTTPError) error {
 	return sentinelWrappedError{
 		error:    err,

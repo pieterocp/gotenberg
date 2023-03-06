@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,7 +57,7 @@ func httpErrorHandler() echo.HTTPErrorHandler {
 // latencyMiddleware sets the start time in the echo.Context under "startTime".
 // Its value will be used later to calculate a request latency.
 //
-//  startTime := c.Get("startTime").(time.Time)
+//	startTime := c.Get("startTime").(time.Time)
 func latencyMiddleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -74,14 +75,14 @@ func latencyMiddleware() echo.MiddlewareFunc {
 // Its value may be used to skip a middleware execution based on a request
 // URI.
 //
-//  rootPath := c.Get("rootPath").(string)
-//  healthURI := fmt.Sprintf("%s/health", rootPath)
+//	rootPath := c.Get("rootPath").(string)
+//	healthURI := fmt.Sprintf("%s/health", rootPath)
 //
-//  // Skip the middleware if health check URI.
-//  if c.Request().RequestURI == healthURI {
-//    // Call the next middleware in the chain.
-//    return next(c)
-//  }
+//	// Skip the middleware if health check URI.
+//	if c.Request().RequestURI == healthURI {
+//	  // Call the next middleware in the chain.
+//	  return next(c)
+//	}
 func rootPathMiddleware(rootPath string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -97,8 +98,8 @@ func rootPathMiddleware(rootPath string) echo.MiddlewareFunc {
 // "trace". Its value is either retrieved from the trace header or generated if
 // the header is not present / its value is empty.
 //
-//  trace := c.Get("trace").(string)
-//  traceHeader := c.Get("traceHeader").(string).
+//	trace := c.Get("trace").(string)
+//	traceHeader := c.Get("traceHeader").(string).
 func traceMiddleware(header string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -119,38 +120,26 @@ func traceMiddleware(header string) echo.MiddlewareFunc {
 	}
 }
 
-// timeoutsMiddleware sets the read, process and write timeouts in the
-// echo.Context under "readTimeout", "processTimeout" and "writeTimeout".
-//
-//  readTimeout := c.Get("readTimeout").(time.Duration)
-//  processTimeout := c.Get("processTimeout").(time.Duration)
-//  writeTimeout := c.Get("writeTimeout").(time.Duration)
-func timeoutsMiddleware(readTimeout, processTimeout, writeTimeout time.Duration) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			c.Set("readTimeout", readTimeout)
-			c.Set("processTimeout", processTimeout)
-			c.Set("writeTimeout", writeTimeout)
-
-			// Call the next middleware in the chain.
-			return next(c)
-		}
-	}
-}
-
 // loggerMiddleware sets the logger in the echo.Context under "logger" and logs
 // a synchronous request result.
 //
-//  logger := c.Get("logger").(*zap.Logger)
+//	logger := c.Get("logger").(*zap.Logger)
 func loggerMiddleware(logger *zap.Logger, disableLoggingForPaths []string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			startTime := c.Get("startTime").(time.Time)
 			trace := c.Get("trace").(string)
+			rootPath := c.Get("rootPath").(string)
 
 			// Create the request logger and add it to our locals.
 			reqLogger := logger.With(zap.String("trace", trace))
-			c.Set("logger", reqLogger)
+			c.Set("logger", reqLogger.Named(func() string {
+				return strings.ReplaceAll(
+					strings.ReplaceAll(c.Request().URL.Path, rootPath, ""),
+					"/",
+					"",
+				)
+			}()))
 
 			// Call the next middleware in the chain.
 			err := next(c)
@@ -159,7 +148,6 @@ func loggerMiddleware(logger *zap.Logger, disableLoggingForPaths []string) echo.
 			}
 
 			for _, path := range disableLoggingForPaths {
-				rootPath := c.Get("rootPath").(string)
 				URI := fmt.Sprintf("%s%s", rootPath, path)
 
 				if c.Request().RequestURI == URI {
@@ -209,16 +197,16 @@ func loggerMiddleware(logger *zap.Logger, disableLoggingForPaths []string) echo.
 // and "cancel". If the process is synchronous, it also handles the result of a
 // "multipart/form-data" request.
 //
-//  ctx := c.Get("context").(*api.Context)
-//  cancel := c.Get("cancel").(context.CancelFunc)
-func contextMiddleware(processTimeout time.Duration) echo.MiddlewareFunc {
+//	ctx := c.Get("context").(*api.Context)
+//	cancel := c.Get("cancel").(context.CancelFunc)
+func contextMiddleware(timeout time.Duration) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			logger := c.Get("logger").(*zap.Logger)
 
 			// We create a context with a timeout so that underlying processes are
 			// able to stop early and handle correctly a timeout scenario.
-			ctx, cancel, err := newContext(c, logger, processTimeout)
+			ctx, cancel, err := newContext(c, logger, timeout)
 			if err != nil {
 				cancel()
 

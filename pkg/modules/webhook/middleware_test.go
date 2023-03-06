@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"math/rand"
 	"mime/multipart"
 	"net/http"
@@ -252,7 +252,7 @@ func TestWebhookMiddlewareGuards(t *testing.T) {
 
 		c := srv.NewContext(tc.request, httptest.NewRecorder())
 
-		ctx := &api.MockContext{Context: &api.Context{}}
+		ctx := &api.ContextMock{Context: &api.Context{}}
 		ctx.SetEchoContext(c)
 
 		c.Set("context", ctx.Context)
@@ -324,6 +324,7 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 			maxRetry:       0,
 			retryMinWait:   0,
 			retryMaxWait:   0,
+			clientTimeout:  time.Duration(30) * time.Second,
 			disable:        false,
 		}
 	}
@@ -338,6 +339,7 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 		expectWebhookFilename         string
 		expectWebhookErrorStatus      int
 		expectWebhookErrorMessage     string
+		returnedError                 *echo.HTTPError
 	}{
 		{
 			request: buildMultipartFormDataRequest(),
@@ -357,13 +359,13 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 			mod:     buildWebhookModule(),
 			next: func() echo.HandlerFunc {
 				return func(c echo.Context) error {
-					return nil
+					return api.NewSentinelHTTPError(http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
 				}
 			}(),
 			expectWebhookContentType:  echo.MIMEApplicationJSONCharsetUTF8,
 			expectWebhookMethod:       http.MethodPost,
-			expectWebhookErrorStatus:  http.StatusInternalServerError,
-			expectWebhookErrorMessage: http.StatusText(http.StatusInternalServerError),
+			expectWebhookErrorStatus:  http.StatusBadRequest,
+			expectWebhookErrorMessage: http.StatusText(http.StatusBadRequest),
 		},
 		{
 			request: func() *http.Request {
@@ -386,6 +388,28 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 			expectWebhookFilename:         "foo",
 			expectWebhookExtraHTTPHeaders: map[string]string{"foo": "bar"},
 		},
+		{
+			request: func() *http.Request {
+				req := buildMultipartFormDataRequest()
+				req.Header.Set("Gotenberg-Output-Filename", "foo")
+
+				return req
+			}(),
+			mod: buildWebhookModule(),
+			next: func() echo.HandlerFunc {
+				return func(c echo.Context) error {
+					ctx := c.Get("context").(*api.Context)
+
+					return ctx.AddOutputPaths("/tests/test/testdata/api/sample1.pdf")
+				}
+			}(),
+			returnedError:             echo.ErrInternalServerError,
+			expectWebhookContentType:  echo.MIMEApplicationJSONCharsetUTF8,
+			expectWebhookMethod:       http.MethodPost,
+			expectWebhookErrorStatus:  http.StatusInternalServerError,
+			expectWebhookErrorMessage: http.StatusText(http.StatusInternalServerError),
+			expectWebhookFilename:     "foo",
+		},
 	} {
 		func() {
 			srv := echo.New()
@@ -397,9 +421,8 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 			c.Set("traceHeader", "Gotenberg-Trace")
 			c.Set("trace", "foo")
 			c.Set("startTime", time.Now())
-			c.Set("writeTimeout", time.Duration(10)*time.Second)
 
-			ctx := &api.MockContext{Context: &api.Context{}}
+			ctx := &api.ContextMock{Context: &api.Context{}}
 			ctx.SetLogger(zap.NewNop())
 			ctx.SetEchoContext(c)
 
@@ -450,7 +473,7 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 						}
 
 						if contentType == echo.MIMEApplicationJSONCharsetUTF8 {
-							body, err := ioutil.ReadAll(c.Request().Body)
+							body, err := io.ReadAll(c.Request().Body)
 							if err != nil {
 								errChan <- err
 								return nil
@@ -489,7 +512,7 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 							t.Errorf("test %d: expected '%s' '%s' to contain '%s'", i, echo.HeaderContentDisposition, contentDisposition, tc.expectWebhookFilename)
 						}
 
-						body, err := ioutil.ReadAll(c.Request().Body)
+						body, err := io.ReadAll(c.Request().Body)
 						if err != nil {
 							errChan <- err
 							return nil
@@ -500,6 +523,11 @@ func TestWebhookMiddlewareAsynchronousProcess(t *testing.T) {
 						}
 
 						errChan <- nil
+
+						if tc.returnedError != nil {
+							return tc.returnedError
+						}
+
 						return nil
 					}
 				}(),

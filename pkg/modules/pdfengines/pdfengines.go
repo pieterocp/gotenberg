@@ -3,6 +3,7 @@ package pdfengines
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gotenberg/gotenberg/v7/pkg/gotenberg"
 	"github.com/gotenberg/gotenberg/v7/pkg/modules/api"
@@ -36,7 +37,7 @@ func (PDFEngines) Descriptor() gotenberg.ModuleDescriptor {
 		ID: "pdfengines",
 		FlagSet: func() *flag.FlagSet {
 			fs := flag.NewFlagSet("pdfengines", flag.ExitOnError)
-			fs.StringSlice("pdfengines-engines", make([]string, 0), "Set the PDF engines - all by default")
+			fs.StringSlice("pdfengines-engines", make([]string, 0), "Set the PDF engines and their order - all by default")
 			fs.Bool("pdfengines-disable-routes", false, "Disable the routes")
 
 			return fs
@@ -52,6 +53,18 @@ func (mod *PDFEngines) Provision(ctx *gotenberg.Context) error {
 	names := flags.MustStringSlice("pdfengines-engines")
 	mod.disableRoutes = flags.MustBool("pdfengines-disable-routes")
 
+	loggerProvider, err := ctx.Module(new(gotenberg.LoggerProvider))
+	if err != nil {
+		return fmt.Errorf("get logger provider: %w", err)
+	}
+
+	logger, err := loggerProvider.(gotenberg.LoggerProvider).Logger(mod)
+	if err != nil {
+		return fmt.Errorf("get logger: %w", err)
+	}
+
+	logger = logger.Named("pdfengines")
+
 	engines, err := ctx.Modules(new(gotenberg.PDFEngine))
 	if err != nil {
 		return fmt.Errorf("get PDF engines: %w", err)
@@ -66,6 +79,13 @@ func (mod *PDFEngines) Provision(ctx *gotenberg.Context) error {
 	if len(names) > 0 {
 		// Selection from user.
 		mod.names = names
+
+		for i, name := range names {
+			logger.Warn("unoconv-pdfengine is deprecated; prefer uno-pdfengine instead")
+			if name == "unoconv-pdfengine" {
+				mod.names[i] = "uno-pdfengine"
+			}
+		}
 
 		return nil
 	}
@@ -118,14 +138,25 @@ func (mod PDFEngines) Validate() error {
 	return fmt.Errorf("non-existing PDF engine(s): %s - available PDF engine(s): %s", nonExistingEngines, availableEngines)
 }
 
+// SystemMessages returns one message with the selected gotenberg.PDFEngine
+// modules.
+func (mod PDFEngines) SystemMessages() []string {
+	return []string{
+		strings.Join(mod.names[:], " "),
+	}
+}
+
 // PDFEngine returns a gotenberg.PDFEngine.
 func (mod PDFEngines) PDFEngine() (gotenberg.PDFEngine, error) {
-	engines := make([]gotenberg.PDFEngine, len(mod.engines))
+	engines := make([]gotenberg.PDFEngine, len(mod.names))
 
-	i := 0
-	for _, engine := range mod.engines {
-		engines[i] = engine
-		i++
+	for i, name := range mod.names {
+		for _, engine := range mod.engines {
+			if name == engine.(gotenberg.Module).Descriptor().ID {
+				engines[i] = engine
+				break
+			}
+		}
 	}
 
 	return newMultiPDFEngines(engines...), nil
@@ -155,6 +186,7 @@ var (
 	_ gotenberg.Module            = (*PDFEngines)(nil)
 	_ gotenberg.Provisioner       = (*PDFEngines)(nil)
 	_ gotenberg.Validator         = (*PDFEngines)(nil)
+	_ gotenberg.SystemLogger      = (*PDFEngines)(nil)
 	_ gotenberg.PDFEngineProvider = (*PDFEngines)(nil)
 	_ api.Router                  = (*PDFEngines)(nil)
 )

@@ -3,7 +3,6 @@ package chromium
 import (
 	"context"
 	"errors"
-	"io/ioutil"
 	"os"
 	"reflect"
 	"regexp"
@@ -176,11 +175,11 @@ func TestChromium_Validate(t *testing.T) {
 func TestChromium_Metrics(t *testing.T) {
 	metrics, err := new(Chromium).Metrics()
 	if err != nil {
-		t.Errorf("expected no error but got: %v", err)
+		t.Fatalf("expected no error but got: %v", err)
 	}
 
 	if len(metrics) != 1 {
-		t.Errorf("expected %d metrics, but got %d", 1, len(metrics))
+		t.Fatalf("expected %d metrics, but got %d", 1, len(metrics))
 	}
 
 	actual := metrics[0].Read()
@@ -225,31 +224,71 @@ func TestChromium_Routes(t *testing.T) {
 }
 
 func TestChromium_PDF(t *testing.T) {
-	for i, tc := range []struct {
+	for _, tc := range []struct {
+		name                     string
 		timeout                  time.Duration
 		cancel                   context.CancelFunc
 		URL                      string
 		options                  Options
 		userAgent                string
 		incognito                bool
+		allowInsecureLocalhost   bool
 		ignoreCertificateErrors  bool
+		disableWebSecurity       bool
 		allowFileAccessFromFiles bool
+		hostResolverRules        string
+		proxyServer              string
 		allowList                *regexp.Regexp
 		denyList                 *regexp.Regexp
+		disableJavaScript        bool
 		expectErr                bool
 	}{
 		{
+			name:      "context has no deadline",
+			URL:       "file:///tests/test/testdata/chromium/html/sample1/index.html",
+			expectErr: true,
+		},
+		{
+			name:      "URL does not match the expression from the allowed list",
+			timeout:   time.Duration(60) * time.Second,
 			URL:       "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			allowList: regexp.MustCompile("file:///tmp/*"),
 			expectErr: true,
 		},
 		{
+			name:      "URL does not match the expression from the denied list",
+			timeout:   time.Duration(60) * time.Second,
 			URL:       "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			denyList:  regexp.MustCompile("file:///tests/*"),
 			expectErr: true,
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			name:    "with user agent",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			options: Options{
+				UserAgent: "foo",
+			},
+		},
+		{
+			name:    "fail on console exceptions",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample10/index.html",
+			options: Options{
+				FailOnConsoleExceptions: true,
+			},
+			expectErr: true,
+		},
+		{
+			name:              "disable JavaScript",
+			timeout:           time.Duration(60) * time.Second,
+			URL:               "file:///tests/test/testdata/chromium/html/sample9/index.html",
+			disableJavaScript: true,
+		},
+		{
+			name:    "with extra HTTP headers",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			options: Options{
 				ExtraHTTPHeaders: map[string]string{
 					"foo": "bar",
@@ -257,12 +296,85 @@ func TestChromium_PDF(t *testing.T) {
 			},
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			name:    "with extra link tags",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample11/index.html",
+			options: Options{
+				ExtraLinkTags: []LinkTag{
+					{
+						Href: "font.woff",
+					},
+					{
+						Href: "style.css",
+					},
+				},
+			},
+		},
+		{
+			name:    "with invalid emulated media type",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample8/index.html",
+			options: Options{
+				EmulatedMediaType: "foo",
+			},
+			expectErr: true,
+		},
+		{
+			name:    "with screen emulated media type",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample8/index.html",
+			options: Options{
+				EmulatedMediaType: "screen",
+			},
+		},
+		{
+			name:    "with print emulated media type",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample8/index.html",
+			options: Options{
+				EmulatedMediaType: "print",
+			},
+		},
+		{
+			name:    "with omit background but not print background",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			options: Options{
+				OmitBackground: true,
+			},
+			expectErr: true,
+		},
+		{
+			name:    "with omit background and print background",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			options: Options{
+				OmitBackground:  true,
+				PrintBackground: true,
+			},
+		},
+		{
+			name:    "with extra script tags",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample11/index.html",
+			options: Options{
+				ExtraScriptTags: []ScriptTag{
+					{
+						Src: "script.js",
+					},
+				},
+			},
+		},
+		{
+			name:    "with wait delay",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			options: Options{
 				WaitDelay: time.Duration(1) * time.Nanosecond,
 			},
 		},
 		{
+			name:    "with invalid wait window status",
 			timeout: time.Duration(3) * time.Second,
 			URL:     "file:///tests/test/testdata/chromium/html/sample2/index.html",
 			options: Options{
@@ -271,6 +383,7 @@ func TestChromium_PDF(t *testing.T) {
 			expectErr: true,
 		},
 		{
+			name:    "with wait window status",
 			timeout: time.Duration(3) * time.Second,
 			URL:     "file:///tests/test/testdata/chromium/html/sample2/index.html",
 			options: Options{
@@ -278,42 +391,86 @@ func TestChromium_PDF(t *testing.T) {
 			},
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			name:    "with wait for expression that should not happen",
+			timeout: time.Duration(3) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample2/index.html",
+			options: Options{
+				WaitForExpression: "window.status === 'foo'",
+			},
+			expectErr: true,
+		},
+		{
+			name:    "with valid wait for expression",
+			timeout: time.Duration(3) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample2/index.html",
+			options: Options{
+				WaitForExpression: "window.status === 'ready'",
+			},
+		},
+		{
+			name:    "with invalid wait for expression",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			options: Options{
+				WaitForExpression: "return undefined",
+			},
+			expectErr: true,
+		},
+		{
+			name:    "with too big margin bottom",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			options: Options{
 				MarginBottom: 100,
 			},
 			expectErr: true,
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			name:    "with invalid page ranges",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			options: Options{
 				PageRanges: "foo",
 			},
 			expectErr: true,
 		},
 		{
+			name:                     "with a lot of properties",
+			timeout:                  time.Duration(60) * time.Second,
 			URL:                      "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			userAgent:                "foo",
 			incognito:                true,
 			ignoreCertificateErrors:  true,
+			allowInsecureLocalhost:   true,
+			disableWebSecurity:       true,
 			allowFileAccessFromFiles: true,
+			hostResolverRules:        "foo",
+			proxyServer:              "foo",
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample1/index.html",
+			name:    "with file using local and remote assets",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample1/index.html",
 		},
 		{
+			name:      "URL does match the expression from the allowed list",
+			timeout:   time.Duration(60) * time.Second,
 			URL:       "file:///tests/test/testdata/chromium/html/sample3/index.html",
 			allowList: regexp.MustCompile("file:///tests/*"),
 		},
 		{
+			name:     "URL does match the expression from the denied list",
+			timeout:  time.Duration(60) * time.Second,
 			URL:      "file:///tests/test/testdata/chromium/html/sample3/index.html",
 			denyList: regexp.MustCompile("file:///etc/*"),
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			name:    "with custom header and footer templates",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
 			options: Options{
 				HeaderTemplate: func() string {
-					b, err := ioutil.ReadFile("/tests/test/testdata/chromium/url/sample2/header.html")
+					b, err := os.ReadFile("/tests/test/testdata/chromium/url/sample2/header.html")
 					if err != nil {
 						t.Fatalf("expected no error but got: %v", err)
 					}
@@ -321,7 +478,7 @@ func TestChromium_PDF(t *testing.T) {
 					return string(b)
 				}(),
 				FooterTemplate: func() string {
-					b, err := ioutil.ReadFile("/tests/test/testdata/chromium/url/sample2/footer.html")
+					b, err := os.ReadFile("/tests/test/testdata/chromium/url/sample2/footer.html")
 					if err != nil {
 						t.Fatalf("expected no error but got: %v", err)
 					}
@@ -331,14 +488,61 @@ func TestChromium_PDF(t *testing.T) {
 			},
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample5/index.html",
+			name:    "with custom header template only",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			options: Options{
+				HeaderTemplate: func() string {
+					b, err := os.ReadFile("/tests/test/testdata/chromium/url/sample2/header.html")
+					if err != nil {
+						t.Fatalf("expected no error but got: %v", err)
+					}
+
+					return string(b)
+				}(),
+				FooterTemplate: DefaultOptions().FooterTemplate,
+			},
 		},
 		{
+			name:    "with custom footer template only",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			options: Options{
+				HeaderTemplate: DefaultOptions().HeaderTemplate,
+				FooterTemplate: func() string {
+					b, err := os.ReadFile("/tests/test/testdata/chromium/url/sample2/footer.html")
+					if err != nil {
+						t.Fatalf("expected no error but got: %v", err)
+					}
+
+					return string(b)
+				}(),
+			},
+		},
+		{
+			name:    "without custom header and footer templates",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample4/index.html",
+			options: Options{
+				HeaderTemplate: DefaultOptions().HeaderTemplate,
+				FooterTemplate: DefaultOptions().FooterTemplate,
+			},
+		},
+		{
+			name:    "with file using a .gif",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample5/index.html",
+		},
+		{
+			name:                     "with allow file access from files",
+			timeout:                  time.Duration(60) * time.Second,
 			URL:                      "file:///tests/test/testdata/chromium/html/sample6/index.html",
 			allowFileAccessFromFiles: true,
 		},
 		{
-			URL: "file:///tests/test/testdata/chromium/html/sample7/index.html",
+			name:    "with file using a style attribute",
+			timeout: time.Duration(60) * time.Second,
+			URL:     "file:///tests/test/testdata/chromium/html/sample7/index.html",
 		},
 	} {
 		func() {
@@ -346,8 +550,12 @@ func TestChromium_PDF(t *testing.T) {
 			mod.binPath = os.Getenv("CHROMIUM_BIN_PATH")
 			mod.userAgent = tc.userAgent
 			mod.incognito = tc.incognito
+			mod.allowInsecureLocalhost = tc.allowInsecureLocalhost
 			mod.ignoreCertificateErrors = tc.ignoreCertificateErrors
+			mod.disableWebSecurity = tc.disableWebSecurity
 			mod.allowFileAccessFromFiles = tc.allowFileAccessFromFiles
+			mod.hostResolverRules = tc.hostResolverRules
+			mod.proxyServer = tc.proxyServer
 
 			if tc.allowList == nil {
 				tc.allowList = regexp.MustCompile("")
@@ -359,16 +567,17 @@ func TestChromium_PDF(t *testing.T) {
 
 			mod.allowList = tc.allowList
 			mod.denyList = tc.denyList
+			mod.disableJavaScript = tc.disableJavaScript
 
 			outputDir, err := gotenberg.MkdirAll()
 			if err != nil {
-				t.Fatalf("test %d: expected error but got: %v", i, err)
+				t.Fatalf("test %s: expected error but got: %v", tc.name, err)
 			}
 
 			defer func() {
 				err := os.RemoveAll(outputDir)
 				if err != nil {
-					t.Fatalf("test %d: expected no error but got: %v", i, err)
+					t.Fatalf("test %s: expected no error but got: %v", tc.name, err)
 				}
 			}()
 
@@ -382,11 +591,11 @@ func TestChromium_PDF(t *testing.T) {
 			}
 
 			if tc.expectErr && err == nil {
-				t.Errorf("test %d: expected error but got: %v", i, err)
+				t.Errorf("test %s: expected error but got: %v", tc.name, err)
 			}
 
 			if !tc.expectErr && err != nil {
-				t.Errorf("test %d: expected no error but got: %v", i, err)
+				t.Errorf("test %s: expected no error but got: %v", tc.name, err)
 			}
 		}()
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gotenberg/gotenberg/v7/pkg/gotenberg"
 	flag "github.com/spf13/pflag"
+	"golang.org/x/sync/errgroup"
 )
 
 // See https://patorjk.com/software/taag/#p=display&f=Small%20Slant&t=Gotenberg.
@@ -33,7 +34,7 @@ var Version = "snapshot"
 func Run() {
 	fmt.Printf(banner, Version)
 
-	// Creates the roo` FlagSet and adds the modules flags to it.
+	// Create the root FlagSet and adds the modules flags to it.
 	fs := flag.NewFlagSet("gotenberg", flag.ExitOnError)
 	fs.Duration("gotenberg-graceful-shutdown-duration", time.Duration(30)*time.Second, "Set the graceful shutdown duration")
 
@@ -46,14 +47,14 @@ func Run() {
 
 	fmt.Printf("[SYSTEM] modules: %s\n", modsInfo)
 
-	// Parses the flags...
+	// Parse the flags...
 	err := fs.Parse(os.Args[1:])
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	// ...and creates a wrapper around those.
+	// ...and create a wrapper around those.
 	parsedFlags := gotenberg.ParsedFlags{FlagSet: fs}
 
 	// Get the graceful shutdown duration.
@@ -61,7 +62,7 @@ func Run() {
 
 	ctx := gotenberg.NewContext(parsedFlags, descriptors)
 
-	// Starts application modules.
+	// Start application modules.
 	apps, err := ctx.Modules(new(gotenberg.App))
 	if err != nil {
 		fmt.Printf("[FATAL] %s\n", err)
@@ -87,7 +88,23 @@ func Run() {
 
 			fmt.Printf("[SYSTEM] %s: %s\n", id, startupMessage)
 		}(a.(gotenberg.App))
+	}
 
+	// Get modules that want to print system messages.
+	sysLoggers, err := ctx.Modules(new(gotenberg.SystemLogger))
+	if err != nil {
+		fmt.Printf("[FATAL] %s\n", err)
+		os.Exit(1)
+	}
+
+	for _, l := range sysLoggers {
+		go func(logger gotenberg.SystemLogger) {
+			id := logger.(gotenberg.Module).Descriptor().ID
+
+			for _, message := range logger.SystemMessages() {
+				fmt.Printf("[SYSTEM] %s: %s\n", id, message)
+			}
+		}(l.(gotenberg.SystemLogger))
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -101,18 +118,40 @@ func Run() {
 	gracefulShutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulShutdownDuration)
 	defer cancel()
 
+	forceQuit := make(chan os.Signal, 1)
+	signal.Notify(forceQuit, os.Interrupt)
+
+	go func() {
+		// In case of force quit, cancel the context.
+		<-forceQuit
+		cancel()
+	}()
+
 	fmt.Printf("[SYSTEM] graceful shutdown of %s\n", gracefulShutdownDuration)
 
+	eg, _ := errgroup.WithContext(gracefulShutdownCtx)
+
 	for _, a := range apps {
-		id := a.(gotenberg.Module).Descriptor().ID
-		app := a.(gotenberg.App)
+		eg.Go(func(app gotenberg.App) func() error {
+			return func() error {
+				id := app.(gotenberg.Module).Descriptor().ID
 
-		err = app.Stop(gracefulShutdownCtx)
-		if err != nil {
-			fmt.Printf("[ERROR] stopping %s: %s\n", id, err)
-		}
+				err = app.Stop(gracefulShutdownCtx)
+				if err != nil {
+					return fmt.Errorf("stopping %s: %w", id, err)
+				}
 
-		fmt.Printf("[SYSTEM] %s: application stopped\n", id)
+				fmt.Printf("[SYSTEM] %s: application stopped\n", id)
+
+				return nil
+			}
+		}(a.(gotenberg.App)))
+	}
+
+	err = eg.Wait()
+	if err != nil {
+		fmt.Printf("[FATAL] %v\n", err)
+		os.Exit(1)
 	}
 
 	os.Exit(0)

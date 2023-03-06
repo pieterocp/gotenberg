@@ -1,7 +1,8 @@
-package unoconv
+package qpdf
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -10,19 +11,19 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestUnoconv_Descriptor(t *testing.T) {
-	descriptor := Unoconv{}.Descriptor()
+func TestQPDF_Descriptor(t *testing.T) {
+	descriptor := QPDF{}.Descriptor()
 
 	actual := reflect.TypeOf(descriptor.New())
-	expect := reflect.TypeOf(new(Unoconv))
+	expect := reflect.TypeOf(new(QPDF))
 
 	if actual != expect {
-		t.Errorf("expected '%'s' but got '%s'", expect, actual)
+		t.Errorf("expected '%s' but got '%s'", expect, actual)
 	}
 }
 
-func TestUnoconv_Provision(t *testing.T) {
-	mod := new(Unoconv)
+func TestQPDF_Provision(t *testing.T) {
+	mod := new(QPDF)
 	ctx := gotenberg.NewContext(gotenberg.ParsedFlags{}, nil)
 
 	err := mod.Provision(ctx)
@@ -31,7 +32,7 @@ func TestUnoconv_Provision(t *testing.T) {
 	}
 }
 
-func TestUnoconv_Validate(t *testing.T) {
+func TestQPDF_Validate(t *testing.T) {
 	for i, tc := range []struct {
 		binPath   string
 		expectErr bool
@@ -44,10 +45,10 @@ func TestUnoconv_Validate(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			binPath: os.Getenv("UNOCONV_BIN_PATH"),
+			binPath: os.Getenv("QPDF_BIN_PATH"),
 		},
 	} {
-		mod := new(Unoconv)
+		mod := new(QPDF)
 		mod.binPath = tc.binPath
 		err := mod.Validate()
 
@@ -61,8 +62,8 @@ func TestUnoconv_Validate(t *testing.T) {
 	}
 }
 
-func TestChromium_Metrics(t *testing.T) {
-	metrics, err := new(Unoconv).Metrics()
+func TestQPDF_Metrics(t *testing.T) {
+	metrics, err := new(QPDF).Metrics()
 	if err != nil {
 		t.Errorf("expected no error but got: %v", err)
 	}
@@ -73,59 +74,43 @@ func TestChromium_Metrics(t *testing.T) {
 
 	actual := metrics[0].Read()
 	if actual != 0 {
-		t.Errorf("expected %d unoconv instances, but got %f", 0, actual)
+		t.Errorf("expected %d QPDF instances, but got %f", 0, actual)
 	}
 }
 
-func TestUnoconv_Unoconv(t *testing.T) {
-	mod := new(Unoconv)
-
-	_, err := mod.Unoconv()
-	if err != nil {
-		t.Errorf("expected no error but got: %v", err)
-	}
-}
-
-func TestUnoconv_PDF(t *testing.T) {
+func TestQPDF_Merge(t *testing.T) {
 	for i, tc := range []struct {
-		ctx       context.Context
-		inputPath string
-		options   Options
-		expectErr bool
+		ctx        context.Context
+		inputPaths []string
+		expectErr  bool
 	}{
 		{
-			expectErr: true,
-		},
-		{
-			ctx:       context.Background(),
-			inputPath: "/tests/test/testdata/libreoffice/sample1.docx",
-			options: Options{
-				Landscape:  true,
-				PageRanges: "1-2",
-				PDFArchive: true,
+			ctx: context.TODO(),
+			inputPaths: []string{
+				"/tests/test/testdata/pdfengines/sample1.pdf",
 			},
 		},
 		{
-			ctx:       context.Background(),
-			inputPath: "/tests/test/testdata/libreoffice/sample1.docx",
-			options: Options{
-				PageRanges: "foo",
+			ctx: context.TODO(),
+			inputPaths: []string{
+				"/tests/test/testdata/pdfengines/sample1.pdf",
+				"/tests/test/testdata/pdfengines/sample2.pdf",
 			},
+		},
+		{
+			ctx:       nil,
 			expectErr: true,
 		},
 		{
-			ctx: func() context.Context {
-				ctx, cancel := context.WithCancel(context.TODO())
-				defer cancel()
-
-				return ctx
-			}(),
-			inputPath: "/tests/test/testdata/libreoffice/sample1.docx",
+			ctx: context.TODO(),
+			inputPaths: []string{
+				"foo",
+			},
 			expectErr: true,
 		},
 	} {
 		func() {
-			mod := new(Unoconv)
+			mod := new(QPDF)
 
 			err := mod.Provision(nil)
 			if err != nil {
@@ -144,7 +129,7 @@ func TestUnoconv_PDF(t *testing.T) {
 				}
 			}()
 
-			err = mod.PDF(tc.ctx, zap.NewNop(), tc.inputPath, outputDir+"/foo.pdf", tc.options)
+			err = mod.Merge(tc.ctx, zap.NewNop(), tc.inputPaths, outputDir+"/foo.pdf")
 
 			if tc.expectErr && err == nil {
 				t.Errorf("test %d: expected error but got: %v", i, err)
@@ -157,14 +142,11 @@ func TestUnoconv_PDF(t *testing.T) {
 	}
 }
 
-func TestUnoconv_Extensions(t *testing.T) {
-	mod := new(Unoconv)
-	extensions := mod.Extensions()
+func TestQPDF_Convert(t *testing.T) {
+	mod := new(QPDF)
+	err := mod.Convert(context.TODO(), zap.NewNop(), "", "", "")
 
-	actual := len(extensions)
-	expect := 76
-
-	if actual != expect {
-		t.Errorf("expected %d extensions but got %d", expect, actual)
+	if !errors.Is(err, gotenberg.ErrPDFEngineMethodNotAvailable) {
+		t.Errorf("expected error %v, but got: %v", gotenberg.ErrPDFEngineMethodNotAvailable, err)
 	}
 }

@@ -1,14 +1,14 @@
 <p align="center">
     <img src="https://user-images.githubusercontent.com/8983173/130322857-185831e2-f041-46eb-a17f-0a69d066c4e5.png" alt="Gotenberg Logo" width="150" height="150" />
-<h3 align="center">Gotenberg</h3>
-<p align="center">A Docker-powered stateless API for PDF files</p>
-<p align="center"><a href="https://gotenberg.dev/docs/about">Documentation</a> &#183; 🔥 <a href="https://gotenberg.dev/docs/get-started/live-demo">Live Demo</a></p>
+    <h3 align="center">Gotenberg</h3>
+    <p align="center">A Docker-powered stateless API for PDF files</p>
+    <p align="center"><a href="https://gotenberg.dev/docs/about">Documentation</a> &#183; 🔥 <a href="https://gotenberg.dev/docs/get-started/live-demo">Live Demo</a></p>
 </p>
 
 ---
 
-Gotenberg provides a developer-friendly API to interact with powerful tools like Chromium and LibreOffice to convert many
-documents (HTML, Markdown, Word, Excel, etc.) to PDF, transform them, merge them, and more!
+Gotenberg provides a developer-friendly API to interact with powerful tools like Chromium and LibreOffice for converting 
+numerous document formats (HTML, Markdown, Word, Excel, etc.) into PDF files, and more!
 
 ## Quick Start
 
@@ -43,4 +43,3 @@ Head to the [documentation](https://gotenberg.dev/docs/about) to learn how to in
 [![Continuous Integration](https://github.com/gotenberg/gotenberg/actions/workflows/continuous_integration.yml/badge.svg)](https://github.com/gotenberg/gotenberg/actions/workflows/continuous_integration.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/gotenberg/gotenberg.svg)](https://pkg.go.dev/github.com/gotenberg/gotenberg/v7)
 [![Codecov](https://codecov.io/gh/gotenberg/gotenberg/branch/main/graph/badge.svg)](https://codecov.io/gh/gotenberg/gotenberg)
-[![Go Report Card](https://goreportcard.com/badge/github.com/gotenberg/gotenberg)](https://goreportcard.com/report/gotenberg/gotenberg)
